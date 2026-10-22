@@ -1,0 +1,17 @@
+{
+  "ConnectionStrings": {
+    "MySql": "server=mysql-gts;port=3306;database=urbano;uid=USUARIO;password=CAMBIAR;Charset=utf8mb4;Pooling=true;Allow User Variables=True;MinimumPoolSize=0;MaximumPoolSize=5;ConnectionTimeout=60;ConnectionLifeTime=55;ConnectionReset=true;DefaultCommandTimeout=120;",
+    "MySqlGts": "server=mysql-gts;port=3306;database=gts;uid=USUARIO;password=CAMBIAR;Charset=utf8mb4;Pooling=true;Allow User Variables=True;MinimumPoolSize=0;MaximumPoolSize=5;ConnectionTimeout=60;ConnectionLifeTime=55;ConnectionReset=true;DefaultCommandTimeout=120;"
+  },
+  "Urls": "http://0.0.0.0:5008",
+  "Webhook": {
+    "SecretToken": ""
+  },
+  "AccountRouting": {
+    "GestionVillaAccounts": [ "transporvilla", "etudvrb", "etudvrg", "etudv22", "serfrymh", "univillag1"]
+  },
+  "Queue": {
+    "Workers": 4,
+    "DbPath": "/app/data/queue.db"
+  }
+}

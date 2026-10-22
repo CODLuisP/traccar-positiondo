@@ -1,0 +1,34 @@
+# Build
+bin/
+obj/
+out/
+publish/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# Configuración con credenciales (solo se versiona el .example)
+appsettings*.json
+!appsettings.json.example
+
+# Datos / cola SQLite
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Logs
+logs/
+*.log
+
+# Credenciales
+.env
+.env.*
+*.pfx
+*.pem
+*.key
+secrets.json

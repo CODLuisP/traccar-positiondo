@@ -1,0 +1,31 @@
+version: "3.8"
+
+services:
+  traccar-position:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: traccar-position:latest
+    container_name: traccar-position
+    restart: unless-stopped
+    environment:
+      - TZ=America/Lima
+    ports:
+      - "127.0.0.1:5008:5008"   # solo pruebas locales; Traccar lo llama por traccar-net
+    volumes:
+      - ./TraccarAgent/appsettings.json:/app/appsettings.json:ro
+      - ./data:/app/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - app-net
+      - traccar-net
+
+networks:
+  app-net:
+    external: true
+  traccar-net:
+    external: true
