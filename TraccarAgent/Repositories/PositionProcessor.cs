@@ -105,9 +105,9 @@ public class PositionProcessor
             await conn.ExecuteAsync(bulkSql, bulkParams, tx);
 
             // ── 2. UPDATE device — solo el más reciente, solo si es más nuevo ─
-            const string updateSql = @"
+            const string updateSqlHead = @"
                 UPDATE device SET
-                    lastValidLatitude   = @LastValidLatitude,
+                    lastValidLatitude  = @LastValidLatitude,
                     lastValidLongitude  = @LastValidLongitude,
                     lastValidHeading    = @LastValidHeading,
                     lastValidSpeed      = @LastValidSpeed,
@@ -135,13 +135,25 @@ public class PositionProcessor
                     lastPositionId      = COALESCE(@LastPositionId,      lastPositionId),
                     motionTime          = COALESCE(@MotionTime,          motionTime),
                     motionLat           = COALESCE(@MotionLat,           motionLat),
-                    motionLon           = COALESCE(@MotionLon,           motionLon)
+                    motionLon           = COALESCE(@MotionLon,           motionLon)";
+
+            const string updateSqlWhere = @"
                 WHERE accountID = @AccountId
                   AND deviceID  = @DeviceId
                   AND (lastGPSTimestamp IS NULL OR lastGPSTimestamp < @LastGPSTimestamp)";
 
+            // Atributos extra: un COALESCE por columna (si no viene, conserva el último valor)
+            var extraSet = string.Concat(PositionMapper.ExtraAttributes
+                .Select(a => $",\n                    `{a.Name}` = COALESCE(@x_{a.Name}, `{a.Name}`)"));
+            var updateSql = updateSqlHead + extraSet + updateSqlWhere;
+
             foreach (var (updateParam, _) in latestPerDevice.Values)
-                await conn.ExecuteAsync(updateSql, updateParam, tx);
+            {
+                var dp = new DynamicParameters(updateParam);
+                foreach (var (name, value) in updateParam.Extras)
+                    dp.Add($"x_{name}", value);
+                await conn.ExecuteAsync(updateSql, dp, tx);
+            }
 
             await tx.CommitAsync();
         }
@@ -159,15 +171,17 @@ public class PositionProcessor
             latitude, longitude, speedKPH, heading, altitude,
             distanceKM, odometerKM, satelliteCount,
             batteryLevel, batteryVolts, vBatteryVolts,
-            engineHours, signalStrength, gpsFixType, creationTime, address
-        ) VALUES ");
+            engineHours, signalStrength, gpsFixType, creationTime, address"
+            + string.Concat(PositionMapper.ExtraAttributes.Select(a => $", `{a.Name}`"))
+            + ") VALUES ");
 
         var p = new DynamicParameters();
         for (int i = 0; i < items.Count; i++)
         {
             if (i > 0) sb.Append(',');
             sb.Append($"(@a{i},@d{i},@ts{i},@sc{i},@lat{i},@lon{i},@spd{i},@hdg{i},@alt{i}," +
-                      $"@dist{i},@odo{i},@sat{i},@bat{i},@bv{i},@vbv{i},@eh{i},@sig{i},@gft{i},@ct{i},@addr{i})");
+                      $"@dist{i},@odo{i},@sat{i},@bat{i},@bv{i},@vbv{i},@eh{i},@sig{i},@gft{i},@ct{i},@addr{i}" +
+                      string.Concat(PositionMapper.ExtraAttributes.Select(a => $",@x_{a.Name}_{i}")) + ")");
 
             var x = items[i];
             p.Add($"a{i}",    x.AccountId);
@@ -190,6 +204,8 @@ public class PositionProcessor
             p.Add($"gft{i}",  x.GpsFixType);
             p.Add($"ct{i}",   x.CreationTime);
             p.Add($"addr{i}", x.Address);
+            foreach (var (name, value) in x.Extras)
+                p.Add($"x_{name}_{i}", value);
         }
 
         return (sb.ToString(), p);

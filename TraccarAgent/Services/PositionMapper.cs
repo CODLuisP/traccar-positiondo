@@ -21,10 +21,6 @@ public static class PositionMapper
     public static double? MsToHours(double? ms) =>
         ms.HasValue ? Math.Round(ms.Value / 3600000.0, 2) : null;
 
-    // Conversión: mV → voltios (Teltonika)
-    public static double? MvToVolts(double? mv) =>
-        mv.HasValue ? Math.Round(mv.Value / 1000.0, 3) : null;
-
     // Conversión: DateTime UTC → Unix timestamp (int)
     public static long? ToUnixTimestamp(DateTime? dt) =>
         dt.HasValue ? ((DateTimeOffset)dt.Value.ToUniversalTime()).ToUnixTimeSeconds() : null;
@@ -88,6 +84,50 @@ public static class PositionMapper
         return $"{cell.MobileCountryCode}-{cell.MobileNetworkCode}-{cell.LocationAreaCode}-{cell.CellId}";
     }
 
+    // ─── Atributos extra (Codec 8 Extended y otros) ───────────────────────────
+    // Se guardan tal cual, con el MISMO nombre que trae Traccar, en una columna propia
+    // de eventdata y de device. Para añadir otro atributo: agregarlo aquí y crear la
+    // columna en ambas tablas (ver sql/001_extra_attributes.sql).
+    public enum AttrKind { Int, Double, Bool }
+
+    public static readonly (string Name, AttrKind Kind)[] ExtraAttributes =
+    [
+        ("priority", AttrKind.Int),
+        ("event", AttrKind.Int),
+        ("ignition", AttrKind.Bool),
+        ("motion", AttrKind.Bool),
+        ("io200", AttrKind.Int),
+        ("io69", AttrKind.Int),
+        ("io81", AttrKind.Int),
+        ("io82", AttrKind.Int),
+        ("io89", AttrKind.Int),
+        ("io68", AttrKind.Int),
+        ("io85", AttrKind.Int),
+        ("io90", AttrKind.Int),
+        ("io83", AttrKind.Int),
+        ("io87", AttrKind.Int),
+        ("io103", AttrKind.Int),
+        ("pdop", AttrKind.Double),
+        ("hdop", AttrKind.Double),
+        ("operator", AttrKind.Int),
+        ("odometer", AttrKind.Double),
+    ];
+
+    public static Dictionary<string, object?> GetExtras(Dictionary<string, object>? attrs)
+    {
+        var result = new Dictionary<string, object?>(ExtraAttributes.Length);
+        foreach (var (name, kind) in ExtraAttributes)
+        {
+            result[name] = kind switch
+            {
+                AttrKind.Int    => GetAttr<long>(attrs, name),
+                AttrKind.Double => GetAttr<double>(attrs, name),
+                _               => GetAttr<bool>(attrs, name) is bool b ? (b ? 1 : 0) : null,
+            };
+        }
+        return result;
+    }
+
     // Construye los parámetros para UPDATE device
     public static DeviceUpdateParams BuildDeviceUpdate(TraccarPositionDto pos, DeviceInfo device)
     {
@@ -131,6 +171,7 @@ public static class PositionMapper
             MotionTime = MsEpochToUnixSeconds(device.MotionTimeMs),
             MotionLat = device.MotionLat,
             MotionLon = device.MotionLon,
+            Extras = GetExtras(attrs),
         };
     }
 
@@ -155,12 +196,14 @@ public static class PositionMapper
             OdometerKM = GetOdometerKm(attrs, pos.Protocol),
             SatelliteCount = GetAttr<int>(attrs, "sat"),
             BatteryLevel = GetAttr<double>(attrs, "batteryLevel"),
-            BatteryVolts = MvToVolts(GetAttr<double>(attrs, "battery")),   // Teltonika
-            VBatteryVolts = MvToVolts(GetAttr<double>(attrs, "power")),      // Teltonika voltaje externo
+            // Traccar ya entrega "battery" y "power" en voltios: no convertir.
+            BatteryVolts = GetAttr<double>(attrs, "battery"),
+            VBatteryVolts = GetAttr<double>(attrs, "power"),     // voltaje externo
             EngineHours = MsToHours(GetAttr<double>(attrs, "hours")),
             SignalStrength = GetAttr<double>(attrs, "rssi"),
             GpsFixType = (pos.Valid == true) ? (short)1 : (short)0,
             CreationTime = (int)(ToUnixTimestamp(pos.ServerTime) ?? 0),
+            Extras = GetExtras(attrs),
         };
     }
 }
@@ -199,6 +242,7 @@ public class DeviceUpdateParams
     public long? MotionTime { get; set; }
     public double? MotionLat { get; set; }
     public double? MotionLon { get; set; }
+    public Dictionary<string, object?> Extras { get; set; } = new();
 }
 
 // Parámetros tipados para INSERT eventdata
@@ -224,4 +268,5 @@ public class EventDataInsertParams
     public double? SignalStrength { get; set; }
     public short GpsFixType { get; set; }
     public int CreationTime { get; set; }
+    public Dictionary<string, object?> Extras { get; set; } = new();
 }
