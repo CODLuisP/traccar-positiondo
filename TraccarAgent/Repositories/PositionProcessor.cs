@@ -114,7 +114,6 @@ public class PositionProcessor
                     lastGPSTimestamp    = @LastGPSTimestamp,
                     lastEventTimestamp  = @LastEventTimestamp,
                     lastUpdateTime      = @LastUpdateTime,
-                    deviceTime          = @DeviceTime,
                     lastOdometerKM      = COALESCE(@LastOdometerKM,      lastOdometerKM),
                     lastEngineHours     = COALESCE(@LastEngineHours,     lastEngineHours),
                     lastBatteryLevel    = COALESCE(@LastBatteryLevel,    lastBatteryLevel),
@@ -154,6 +153,28 @@ public class PositionProcessor
                     dp.Add($"x_{name}", value);
                 await conn.ExecuteAsync(updateSql, dp, tx);
             }
+
+            // ── 3. UPDATE deviceTime — independiente del fixTime ─────────────
+            // Con el equipo detenido, los reportes repiten el fixTime pero traen
+            // un deviceTime nuevo, así que no pasan el filtro del UPDATE anterior.
+            const string deviceTimeSql = @"
+                UPDATE device SET deviceTime = @DeviceTime
+                WHERE accountID = @AccountId
+                  AND deviceID  = @DeviceId
+                  AND (deviceTime IS NULL OR deviceTime < @DeviceTime)";
+
+            var latestDeviceTimes = items
+                .Where(x => x.Pos.DeviceTime.HasValue)
+                .GroupBy(x => (x.Device.AccountId, x.Device.DeviceId))
+                .Select(g => new
+                {
+                    g.Key.AccountId,
+                    g.Key.DeviceId,
+                    DeviceTime = g.Max(x => PositionMapper.ToUnixTimestamp(x.Pos.DeviceTime)),
+                });
+
+            foreach (var deviceTimeParam in latestDeviceTimes)
+                await conn.ExecuteAsync(deviceTimeSql, deviceTimeParam, tx);
 
             await tx.CommitAsync();
         }
