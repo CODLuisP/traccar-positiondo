@@ -84,48 +84,26 @@ public static class PositionMapper
         return $"{cell.MobileCountryCode}-{cell.MobileNetworkCode}-{cell.LocationAreaCode}-{cell.CellId}";
     }
 
-    // ─── Atributos extra (Codec 8 Extended y otros) ───────────────────────────
-    // Se guardan tal cual, con el MISMO nombre que trae Traccar, en una columna propia
-    // de eventdata y de device. Para añadir otro atributo: agregarlo aquí y crear la
-    // columna en ambas tablas (ver sql/001_extra_attributes.sql).
-    public enum AttrKind { Int, Double, Bool }
+    // ─── Atributos de telemetría ──────────────────────────────────────────────
+    // position.attributes se guarda completo en la columna JSON "attributes", sin
+    // filtrar: un atributo nuevo no requiere crear columnas ni tocar el agente.
+    public static string? ToAttributesJson(Dictionary<string, object>? attrs) =>
+        attrs is null ? null : JsonSerializer.Serialize(attrs);
 
-    public static readonly (string Name, AttrKind Kind)[] ExtraAttributes =
-    [
-        ("priority", AttrKind.Int),
-        ("event", AttrKind.Int),
-        ("ignition", AttrKind.Bool),
-        ("motion", AttrKind.Bool),
-        ("io200", AttrKind.Int),
-        ("io69", AttrKind.Int),
-        ("io81", AttrKind.Int),
-        ("io82", AttrKind.Int),
-        ("io89", AttrKind.Int),
-        ("io68", AttrKind.Int),
-        ("io85", AttrKind.Int),
-        ("io90", AttrKind.Int),
-        ("io83", AttrKind.Int),
-        ("io87", AttrKind.Int),
-        ("io103", AttrKind.Int),
-        ("pdop", AttrKind.Double),
-        ("hdop", AttrKind.Double),
-        ("operator", AttrKind.Int),
-        ("odometer", AttrKind.Double),
-    ];
-
-    public static Dictionary<string, object?> GetExtras(Dictionary<string, object>? attrs)
+    // Une los atributos de varios reportes (del más antiguo al más reciente), para
+    // que un IO ausente en el último paquete conserve su último valor conocido.
+    // "alarm" es un evento puntual: solo cuenta si viene en el último reporte.
+    public static string MergeAttributesJson(IEnumerable<Dictionary<string, object>?> reportsOldestFirst)
     {
-        var result = new Dictionary<string, object?>(ExtraAttributes.Length);
-        foreach (var (name, kind) in ExtraAttributes)
+        var merged = new Dictionary<string, object>();
+        foreach (var attrs in reportsOldestFirst)
         {
-            result[name] = kind switch
-            {
-                AttrKind.Int    => GetAttr<long>(attrs, name),
-                AttrKind.Double => GetAttr<double>(attrs, name),
-                _               => GetAttr<bool>(attrs, name) is bool b ? (b ? 1 : 0) : null,
-            };
+            merged.Remove("alarm");
+            if (attrs is null) continue;
+            foreach (var (name, value) in attrs)
+                if (value is not null) merged[name] = value;
         }
-        return result;
+        return JsonSerializer.Serialize(merged);
     }
 
     // Construye los parámetros para UPDATE device
@@ -171,7 +149,6 @@ public static class PositionMapper
             MotionTime = MsEpochToUnixSeconds(device.MotionTimeMs),
             MotionLat = device.MotionLat,
             MotionLon = device.MotionLon,
-            Extras = GetExtras(attrs),
         };
     }
 
@@ -203,7 +180,7 @@ public static class PositionMapper
             SignalStrength = GetAttr<double>(attrs, "rssi"),
             GpsFixType = (pos.Valid == true) ? (short)1 : (short)0,
             CreationTime = (int)(ToUnixTimestamp(pos.ServerTime) ?? 0),
-            Extras = GetExtras(attrs),
+            Attributes = ToAttributesJson(attrs),
         };
     }
 }
@@ -242,7 +219,6 @@ public class DeviceUpdateParams
     public long? MotionTime { get; set; }
     public double? MotionLat { get; set; }
     public double? MotionLon { get; set; }
-    public Dictionary<string, object?> Extras { get; set; } = new();
 }
 
 // Parámetros tipados para INSERT eventdata
@@ -268,5 +244,5 @@ public class EventDataInsertParams
     public double? SignalStrength { get; set; }
     public short GpsFixType { get; set; }
     public int CreationTime { get; set; }
-    public Dictionary<string, object?> Extras { get; set; } = new();
+    public string? Attributes { get; set; }
 }
