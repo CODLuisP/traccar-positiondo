@@ -142,15 +142,16 @@ public class PositionProcessor
             foreach (var (updateParam, _) in latestPerDevice.Values)
                 await conn.ExecuteAsync(updateSql, updateParam, tx);
 
-            // ── 3. UPDATE deviceTime y attributes — independiente del fixTime ─
+            // ── 3. UPDATE deviceTime, ignition y attributes — independiente del fixTime ─
             // Con el equipo detenido, los reportes repiten el fixTime pero traen
             // un deviceTime nuevo, así que no pasan el filtro del UPDATE anterior.
             // JSON_MERGE_PATCH conserva las claves que no vienen en este lote.
             const string telemetrySql = @"
                 UPDATE device SET
                     deviceTime = @DeviceTime,
+                    ignition   = COALESCE(@Ignition, ignition),
                     attributes = JSON_MERGE_PATCH(
-                        JSON_REMOVE(COALESCE(attributes, JSON_OBJECT()), '$.alarm'),
+                        JSON_REMOVE(COALESCE(attributes, JSON_OBJECT()), '$.alarm', '$.ignition'),
                         @Attributes)
                 WHERE accountID = @AccountId
                   AND deviceID  = @DeviceId
@@ -164,6 +165,10 @@ public class PositionProcessor
                     g.Key.AccountId,
                     g.Key.DeviceId,
                     DeviceTime = g.Max(x => PositionMapper.ToUnixTimestamp(x.Pos.DeviceTime)),
+                    // Último valor de ignition recibido en el lote
+                    Ignition = g.OrderBy(x => x.Pos.DeviceTime)
+                        .Select(x => PositionMapper.GetAttr<bool>(x.Pos.Attributes, "ignition"))
+                        .LastOrDefault(v => v.HasValue),
                     Attributes = PositionMapper.MergeAttributesJson(
                         g.OrderBy(x => x.Pos.DeviceTime).Select(x => x.Pos.Attributes)),
                 });
@@ -187,7 +192,7 @@ public class PositionProcessor
             latitude, longitude, speedKPH, heading, altitude,
             distanceKM, odometerKM, satelliteCount,
             batteryLevel, batteryVolts, vBatteryVolts,
-            engineHours, signalStrength, gpsFixType, creationTime, address, attributes
+            engineHours, signalStrength, gpsFixType, creationTime, address, ignition, attributes
         ) VALUES ");
 
         var p = new DynamicParameters();
@@ -195,7 +200,7 @@ public class PositionProcessor
         {
             if (i > 0) sb.Append(',');
             sb.Append($"(@a{i},@d{i},@ts{i},@sc{i},@lat{i},@lon{i},@spd{i},@hdg{i},@alt{i}," +
-                      $"@dist{i},@odo{i},@sat{i},@bat{i},@bv{i},@vbv{i},@eh{i},@sig{i},@gft{i},@ct{i},@addr{i},@attr{i})");
+                      $"@dist{i},@odo{i},@sat{i},@bat{i},@bv{i},@vbv{i},@eh{i},@sig{i},@gft{i},@ct{i},@addr{i},@ign{i},@attr{i})");
 
             var x = items[i];
             p.Add($"a{i}",    x.AccountId);
@@ -218,6 +223,7 @@ public class PositionProcessor
             p.Add($"gft{i}",  x.GpsFixType);
             p.Add($"ct{i}",   x.CreationTime);
             p.Add($"addr{i}", x.Address);
+            p.Add($"ign{i}",  x.Ignition);
             p.Add($"attr{i}", x.Attributes);
         }
 

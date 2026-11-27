@@ -87,8 +87,10 @@ public static class PositionMapper
     // ─── Atributos de telemetría ──────────────────────────────────────────────
     // position.attributes se guarda completo en la columna JSON "attributes", sin
     // filtrar: un atributo nuevo no requiere crear columnas ni tocar el agente.
+    // Excepción: "ignition" va solo en su propia columna "ignition".
     public static string? ToAttributesJson(Dictionary<string, object>? attrs) =>
-        attrs is null ? null : JsonSerializer.Serialize(attrs);
+        attrs is null ? null : JsonSerializer.Serialize(
+            attrs.Where(a => a.Key != "ignition").ToDictionary(a => a.Key, a => a.Value));
 
     // Une los atributos de varios reportes (del más antiguo al más reciente), para
     // que un IO ausente en el último paquete conserve su último valor conocido.
@@ -101,7 +103,7 @@ public static class PositionMapper
             merged.Remove("alarm");
             if (attrs is null) continue;
             foreach (var (name, value) in attrs)
-                if (value is not null) merged[name] = value;
+                if (value is not null && name != "ignition") merged[name] = value;
         }
         return JsonSerializer.Serialize(merged);
     }
@@ -180,6 +182,7 @@ public static class PositionMapper
             SignalStrength = GetAttr<double>(attrs, "rssi"),
             GpsFixType = (pos.Valid == true) ? (short)1 : (short)0,
             CreationTime = (int)(ToUnixTimestamp(pos.ServerTime) ?? 0),
+            Ignition = GetAttr<bool>(attrs, "ignition"),
             Attributes = ToAttributesJson(attrs),
         };
     }
@@ -244,5 +247,6 @@ public class EventDataInsertParams
     public double? SignalStrength { get; set; }
     public short GpsFixType { get; set; }
     public int CreationTime { get; set; }
+    public bool? Ignition { get; set; }
     public string? Attributes { get; set; }
 }
